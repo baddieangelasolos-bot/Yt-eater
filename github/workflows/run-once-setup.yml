@@ -1,4 +1,4 @@
-name: Run‑once setup & initial pipeline run
+name: Run-once setup & initial pipeline run
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: "YouTube channel URL for style/reference"
         required: true
       source_channels:
-        description: "Comma‑separated list of source channel URLs"
+        description: "Comma-separated list of source channel URLs"
         required: true
       clip_duration:
         description: "Length of each clip in seconds"
@@ -138,8 +138,8 @@ jobs:
           git config user.name "Video Bot"
           git config user.email "bot@example.com"
           git add .
-          git commit -m "🛠️ Run‑once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
-          git push
+          git commit -m "🛠️ Run-once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
+          git push origin HEAD:${{ github.ref_name }}
 
       - name: Finish
         run: echo "✅ Setup complete"
