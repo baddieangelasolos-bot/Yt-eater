@@ -142,16 +142,10 @@ jobs:
         run: |
           git config user.name "Video Bot"
           git config user.email "bot@example.com"
+          git pull --rebase origin ${{ github.ref_name }} || true
           git add .
           git commit -m "🛠️ Run-once setup: complete directory and script scaffolding" || echo "No changes to commit"
           git push origin HEAD:${{ github.ref_name }}
 
-      - name: Upload output artifacts (if any)
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-output
-          path: output/
-          if-no-files-found: ignore
-
-      - name: Finish
-        run: echo "✅ Setup and run complete!"
+      - name: Upload output
+      
