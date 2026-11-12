@@ -1,7 +1,7 @@
 {
-  "reference_channel_url": "https://youtube.com/@jlproductions7?si=JCh4GsDj5f8jXXX1",
+  "reference_channel_url": "https://www.youtube.com/@DefaultReference",
   "source_channels": [
-    "https://youtube.com/@jlproductions7?si=JCh4GsDj5f8jXXX1"
+    "https://www.youtube.com/@DefaultSource"
   ],
   "clip_duration": 15,
   "fps": 30,
