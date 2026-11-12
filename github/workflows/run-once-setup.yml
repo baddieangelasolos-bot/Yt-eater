@@ -1,4 +1,4 @@
-name: Run-once setup & initial pipeline run
+name: Run-once setup and pipeline
 
 on:
   workflow_dispatch:
@@ -25,7 +25,6 @@ on:
 jobs:
   setup-and-run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
     permissions:
       contents: write
       actions: write
@@ -41,27 +40,33 @@ jobs:
           persist-credentials: true
 
       - name: Create folder structure
-        run: |
-          mkdir -p scripts config data clips output
+        run: mkdir -p scripts config data clips output
 
       - name: Write channel configuration
+        env:
+          REF_URL: ${{ github.event.inputs.reference_channel_url }}
+          SRC_CHANNELS: ${{ github.event.inputs.source_channels }}
+          CLIP_DUR: ${{ github.event.inputs.clip_duration }}
+          TARGET_FPS: ${{ github.event.inputs.fps }}
+          OUT_RES: ${{ github.event.inputs.output_resolution }}
         run: |
-          cat > config/channel_config.json <<EOF
-          {
-            "reference_channel_url": "${{ github.event.inputs.reference_channel_url }}",
-            "source_channels": "${{ github.event.inputs.source_channels }}",
-            "clip_duration": ${{ github.event.inputs.clip_duration }},
-            "fps": ${{ github.event.inputs.fps }},
-            "output_resolution": "${{ github.event.inputs.output_resolution }}"
+          python3 -c '
+          import os, json
+          cfg = {
+              "reference_channel_url": os.environ["REF_URL"],
+              "source_channels": [s.strip() for s in os.environ["SRC_CHANNELS"].split(",") if s.strip()],
+              "clip_duration": int(os.environ["CLIP_DUR"]),
+              "fps": int(os.environ["TARGET_FPS"]),
+              "output_resolution": os.environ["OUT_RES"]
           }
-          EOF
+          with open("config/channel_config.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          '
 
       - name: Write Python scripts
         run: |
-          # fetch_channel_videos.py
-          cat > scripts/fetch_channel_videos.py <<'PY'
-          #!/usr/bin/env python3
-          import os, json
+          cat << 'PY' > scripts/fetch_channel_videos.py
+          import json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would fetch videos from", cfg['reference_channel_url'])
@@ -69,10 +74,8 @@ jobs:
               main()
           PY
 
-          # download_clips.py
-          cat > scripts/download_clips.py <<'PY'
-          #!/usr/bin/env python3
-          import os, json
+          cat << 'PY' > scripts/download_clips.py
+          import json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would download clips from", cfg['source_channels'])
@@ -80,10 +83,8 @@ jobs:
               main()
           PY
 
-          # analyze_channel_style.py
-          cat > scripts/analyze_channel_style.py <<'PY'
-          #!/usr/bin/env python3
-          import os, json
+          cat << 'PY' > scripts/analyze_channel_style.py
+          import json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would analyze style from", cfg['reference_channel_url'])
@@ -91,10 +92,8 @@ jobs:
               main()
           PY
 
-          # generate_edit_list.py
-          cat > scripts/generate_edit_list.py <<'PY'
-          #!/usr/bin/env python3
-          import os, json
+          cat << 'PY' > scripts/generate_edit_list.py
+          import json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would generate edit list using", cfg['clip_duration'], "seconds per clip")
@@ -102,10 +101,8 @@ jobs:
               main()
           PY
 
-          # render_final_video.py
-          cat > scripts/render_final_video.py <<'PY'
-          #!/usr/bin/env python3
-          import os, json, subprocess
+          cat << 'PY' > scripts/render_final_video.py
+          import json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would render video with resolution", cfg['output_resolution'])
@@ -121,7 +118,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
 
       - name: Run dummy pipeline
         run: |
@@ -138,7 +135,7 @@ jobs:
           git config user.name "Video Bot"
           git config user.email "bot@example.com"
           git add .
-          git commit -m "🛠️ Run-once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
+          git commit -m "🛠️ Run-once setup: hardened configuration and pipeline stubs" || echo "No changes to commit"
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Finish
