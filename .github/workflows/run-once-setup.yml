@@ -1,0 +1,152 @@
+name: Run-once setup and pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      reference_channel_url:
+        description: "YouTube channel URL for style/reference"
+        required: true
+      source_channels:
+        description: "Comma-separated list of source channel URLs"
+        required: true
+      clip_duration:
+        description: "Length of each clip in seconds"
+        required: true
+        default: "15"
+      fps:
+        description: "Target frame rate"
+        required: true
+        default: "30"
+      output_resolution:
+        description: "Output resolution"
+        required: true
+        default: "1920x1080"
+
+jobs:
+  setup-and-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Create folder structure
+        run: mkdir -p scripts config data clips output
+
+      - name: Write channel configuration
+        env:
+          REF_URL: ${{ github.event.inputs.reference_channel_url }}
+          SRC_CHANNELS: ${{ github.event.inputs.source_channels }}
+          CLIP_DUR: ${{ github.event.inputs.clip_duration }}
+          TARGET_FPS: ${{ github.event.inputs.fps }}
+          OUT_RES: ${{ github.event.inputs.output_resolution }}
+        run: |
+          # If triggered via push, inputs might be empty; provide fallbacks for testing
+          python3 -c '
+          import os, json
+          ref = os.environ.get("REF_URL") or "https://www.youtube.com/@DefaultReference"
+          src = os.environ.get("SRC_CHANNELS") or "https://www.youtube.com/@DefaultSource"
+          dur = os.environ.get("CLIP_DUR") or "15"
+          fps = os.environ.get("TARGET_FPS") or "30"
+          res = os.environ.get("OUT_RES") or "1920x1080"
+          
+          cfg = {
+              "reference_channel_url": ref,
+              "source_channels": [s.strip() for s in src.split(",") if s.strip()],
+              "clip_duration": int(dur),
+              "fps": int(fps),
+              "output_resolution": res
+          }
+          with open("config/channel_config.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          '
+
+      - name: Write Python scripts
+        run: |
+          cat << 'PY' > scripts/fetch_channel_videos.py
+          import json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would fetch videos from", cfg['reference_channel_url'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+          cat << 'PY' > scripts/download_clips.py
+          import json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would download clips from", cfg['source_channels'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+          cat << 'PY' > scripts/analyze_channel_style.py
+          import json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would analyze style from", cfg['reference_channel_url'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+          cat << 'PY' > scripts/generate_edit_list.py
+          import json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would generate edit list using", cfg['clip_duration'], "seconds per clip")
+          if __name__ == '__main__':
+              main()
+          PY
+
+          cat << 'PY' > scripts/render_final_video.py
+          import json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would render video with resolution", cfg['output_resolution'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.py
+
+      - name: Install OS tools & Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+
+      - name: Run dummy pipeline
+        run: |
+          echo "Running dummy pipeline ..."
+          python scripts/fetch_channel_videos.py
+          python scripts/download_clips.py
+          python scripts/analyze_channel_style.py
+          python scripts/generate_edit_list.py
+          python scripts/render_final_video.py
+          echo "Pipeline finished"
+
+      - name: Commit files
+        run: |
+          git config user.name "Video Bot"
+          git config user.email "bot@example.com"
+          git add .
+          git commit -m "🛠️ Run-once setup: finalized workflow code" || echo "No changes to commit"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Finish
+        run: echo "✅ Setup complete"
+        
