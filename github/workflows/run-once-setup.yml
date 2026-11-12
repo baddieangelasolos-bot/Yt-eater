@@ -4,101 +4,67 @@ on:
   workflow_dispatch:
     inputs:
       reference_channel_url:
-        description: "YouTube channel URL that will be used as the style/reference (e.g. https://www.youtube.com/@YourChannel)"
+        description: "YouTube channel URL for style/reference"
         required: true
       source_channels:
-        description: "Comma‑separated list of source channels (comma‑separated URLs or channel IDs)."
+        description: "Comma‑separated list of source channel URLs"
         required: true
       clip_duration:
-        description: "Length of each clip in seconds (e.g. 15)"
+        description: "Length of each clip in seconds"
         required: true
+        default: "15"
       fps:
-        description: "Target frame rate (e.g. 30)"
+        description: "Target frame rate"
         required: true
+        default: "30"
       output_resolution:
-        description: "Output resolution (e.g. 1920x1080)"
+        description: "Output resolution"
         required: true
-      fps:
-        description: "Target frame rate for the final video (same as above, kept for backward compatibility)"
-        required: true
-      clip_duration:
-        description: "Duration of each individual clip in seconds (override fps if needed)"
-        required: true
-      clip_duration_override:
-        description: "If you want a different clip length than fps‑derived, set it here (in seconds)"
-        required: true
-      output_resolution_width:
-        description: "Width of the final video (e.g. 1920)"
-        required: true
-      fps_override:
-        description: "Override fps (if you want a different fps than the one above)"
-        required: true
+        default: "1920x1080"
 
 jobs:
   setup-and-run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
-      contents: write          # needed to commit files
+      contents: write
       actions: write
 
     env:
-      # GitHub secrets – you must add these before running the workflow
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
 
     steps:
-      # --------------------------------------------------------------
-      # 1️⃣  Checkout the repository (so we can create files and push)
-      # --------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true   # needed for the commit later
+          persist-credentials: true
 
-      # --------------------------------------------------------------
-      # 2️⃣  Create the folder structure (folders already exist in a repo,
-      #      but we make sure they exist)
-      # --------------------------------------------------------------
       - name: Create folder structure
         run: |
           mkdir -p scripts config data clips output
 
-      # --------------------------------------------------------------
-      # 2️⃣  Write the configuration file (channel_config.json)
-      # --------------------------------------------------------------
       - name: Write channel configuration
         run: |
           cat > config/channel_config.json <<EOF
           {
             "reference_channel_url": "${{ github.event.inputs.reference_channel_url }}",
-            "source_channels": [
-              ${{ split(github.event.inputs.source_channels, ',') }}
-            },
+            "source_channels": "${{ github.event.inputs.source_channels }}",
             "clip_duration": ${{ github.event.inputs.clip_duration }},
-            "clip_duration_override": "${{ github.event.inputs.clip_duration_override }}",
             "fps": ${{ github.event.inputs.fps }},
-            "fps_override": "${{ github.event.inputs.fps_override }}",
-            "output_resolution": "${{ github.event.inputs.output_resolution }}",
-            "output_resolution_width": ${{ github.event.inputs.output_resolution_width }},
-            "fps_override": "${{ github.event.inputs.fps_override }}"
+            "output_resolution": "${{ github.event.inputs.output_resolution }}"
           }
           EOF
 
-      # --------------------------------------------------------------
-      # 3️⃣  Write the minimal Python scripts (copy‑paste from the examples below)
-      # --------------------------------------------------------------
       - name: Write Python scripts
         run: |
           # fetch_channel_videos.py
           cat > scripts/fetch_channel_videos.py <<'PY'
           #!/usr/bin/env python3
-          """Very small stub – in a real repo you would use the YouTube Data API."""
           import os, json
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would fetch videos from", cfg['reference_channel_url'])
-              # In a real implementation you would call the YouTube Data API here.
           if __name__ == '__main__':
               main()
           PY
@@ -143,7 +109,6 @@ jobs:
           def main():
               cfg = json.load(open('config/channel_config.json'))
               print("Would render video with resolution", cfg['output_resolution'])
-              # In a real implementation you would call FFmpeg here.
           if __name__ == '__main__':
               main()
           PY
@@ -151,9 +116,6 @@ jobs:
       - name: Make scripts executable
         run: chmod +x scripts/*.py
 
-      # --------------------------------------------------------------
-      # 4️⃣  Install OS‑level dependencies (ffmpeg) and Python deps
-      # --------------------------------------------------------------
       - name: Install OS tools & Python deps
         run: |
           sudo apt-get update
@@ -161,10 +123,7 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # --------------------------------------------------------------
-      # 5️⃣  Run a **dummy** pipeline (just to prove everything works)
-      # --------------------------------------------------------------
-      - name: Run dummy pipeline (proof‑of‑concept)
+      - name: Run dummy pipeline
         run: |
           echo "Running dummy pipeline ..."
           python scripts/fetch_channel_videos.py
@@ -172,19 +131,16 @@ jobs:
           python scripts/analyze_channel_style.py
           python scripts/generate_edit_list.py
           python scripts/render_final_video.py
-          echo "Pipeline finished – a video would be created in output/"
+          echo "Pipeline finished"
 
-      # --------------------------------------------------------------
-      # 6️⃣  Commit the newly created files (so you have a clean repo)
-      # --------------------------------------------------------------
       - name: Commit files
         run: |
           git config user.name "Video Bot"
           git config user.email "bot@example.com"
           git add .
-          git commit -m "🛠️  Run‑once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
+          git commit -m "🛠️ Run‑once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
           git push
-        
+
       - name: Finish
-        run: echo "✅ Setup complete – your repo now contains the folder structure, config file and stub scripts."
+        run: echo "✅ Setup complete"
         
