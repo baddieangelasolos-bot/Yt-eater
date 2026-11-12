@@ -1,0 +1,190 @@
+name: Run‑once setup & initial pipeline run
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_channel_url:
+        description: "YouTube channel URL that will be used as the style/reference (e.g. https://www.youtube.com/@YourChannel)"
+        required: true
+      source_channels:
+        description: "Comma‑separated list of source channels (comma‑separated URLs or channel IDs)."
+        required: true
+      clip_duration:
+        description: "Length of each clip in seconds (e.g. 15)"
+        required: true
+      fps:
+        description: "Target frame rate (e.g. 30)"
+        required: true
+      output_resolution:
+        description: "Output resolution (e.g. 1920x1080)"
+        required: true
+      fps:
+        description: "Target frame rate for the final video (same as above, kept for backward compatibility)"
+        required: true
+      clip_duration:
+        description: "Duration of each individual clip in seconds (override fps if needed)"
+        required: true
+      clip_duration_override:
+        description: "If you want a different clip length than fps‑derived, set it here (in seconds)"
+        required: true
+      output_resolution_width:
+        description: "Width of the final video (e.g. 1920)"
+        required: true
+      fps_override:
+        description: "Override fps (if you want a different fps than the one above)"
+        required: true
+
+jobs:
+  setup-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write          # needed to commit files
+      actions: write
+
+    env:
+      # GitHub secrets – you must add these before running the workflow
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
+
+    steps:
+      # --------------------------------------------------------------
+      # 1️⃣  Checkout the repository (so we can create files and push)
+      # --------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true   # needed for the commit later
+
+      # --------------------------------------------------------------
+      # 2️⃣  Create the folder structure (folders already exist in a repo,
+      #      but we make sure they exist)
+      # --------------------------------------------------------------
+      - name: Create folder structure
+        run: |
+          mkdir -p scripts config data clips output
+
+      # --------------------------------------------------------------
+      # 2️⃣  Write the configuration file (channel_config.json)
+      # --------------------------------------------------------------
+      - name: Write channel configuration
+        run: |
+          cat > config/channel_config.json <<EOF
+          {
+            "reference_channel_url": "${{ github.event.inputs.reference_channel_url }}",
+            "source_channels": [
+              ${{ split(github.event.inputs.source_channels, ',') }}
+            },
+            "clip_duration": ${{ github.event.inputs.clip_duration }},
+            "clip_duration_override": "${{ github.event.inputs.clip_duration_override }}",
+            "fps": ${{ github.event.inputs.fps }},
+            "fps_override": "${{ github.event.inputs.fps_override }}",
+            "output_resolution": "${{ github.event.inputs.output_resolution }}",
+            "output_resolution_width": ${{ github.event.inputs.output_resolution_width }},
+            "fps_override": "${{ github.event.inputs.fps_override }}"
+          }
+          EOF
+
+      # --------------------------------------------------------------
+      # 3️⃣  Write the minimal Python scripts (copy‑paste from the examples below)
+      # --------------------------------------------------------------
+      - name: Write Python scripts
+        run: |
+          # fetch_channel_videos.py
+          cat > scripts/fetch_channel_videos.py <<'PY'
+          #!/usr/bin/env python3
+          """Very small stub – in a real repo you would use the YouTube Data API."""
+          import os, json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would fetch videos from", cfg['reference_channel_url'])
+              # In a real implementation you would call the YouTube Data API here.
+          if __name__ == '__main__':
+              main()
+          PY
+
+          # download_clips.py
+          cat > scripts/download_clips.py <<'PY'
+          #!/usr/bin/env python3
+          import os, json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would download clips from", cfg['source_channels'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+          # analyze_channel_style.py
+          cat > scripts/analyze_channel_style.py <<'PY'
+          #!/usr/bin/env python3
+          import os, json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would analyze style from", cfg['reference_channel_url'])
+          if __name__ == '__main__':
+              main()
+          PY
+
+          # generate_edit_list.py
+          cat > scripts/generate_edit_list.py <<'PY'
+          #!/usr/bin/env python3
+          import os, json
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would generate edit list using", cfg['clip_duration'], "seconds per clip")
+          if __name__ == '__main__':
+              main()
+          PY
+
+          # render_final_video.py
+          cat > scripts/render_final_video.py <<'PY'
+          #!/usr/bin/env python3
+          import os, json, subprocess
+          def main():
+              cfg = json.load(open('config/channel_config.json'))
+              print("Would render video with resolution", cfg['output_resolution'])
+              # In a real implementation you would call FFmpeg here.
+          if __name__ == '__main__':
+              main()
+          PY
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.py
+
+      # --------------------------------------------------------------
+      # 4️⃣  Install OS‑level dependencies (ffmpeg) and Python deps
+      # --------------------------------------------------------------
+      - name: Install OS tools & Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # --------------------------------------------------------------
+      # 5️⃣  Run a **dummy** pipeline (just to prove everything works)
+      # --------------------------------------------------------------
+      - name: Run dummy pipeline (proof‑of‑concept)
+        run: |
+          echo "Running dummy pipeline ..."
+          python scripts/fetch_channel_videos.py
+          python scripts/download_clips.py
+          python scripts/analyze_channel_style.py
+          python scripts/generate_edit_list.py
+          python scripts/render_final_video.py
+          echo "Pipeline finished – a video would be created in output/"
+
+      # --------------------------------------------------------------
+      # 6️⃣  Commit the newly created files (so you have a clean repo)
+      # --------------------------------------------------------------
+      - name: Commit files
+        run: |
+          git config user.name "Video Bot"
+          git config user.email "bot@example.com"
+          git add .
+          git commit -m "🛠️  Run‑once setup: created folder structure, config and stub scripts" || echo "No changes to commit"
+          git push
+        
+      - name: Finish
+        run: echo "✅ Setup complete – your repo now contains the folder structure, config file and stub scripts."
+        
