@@ -1,0 +1,370 @@
+name: Run Once Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_channel_url:
+        description: "Reference channel URL"
+        type: string
+        required: true
+        default: "https://www.youtube.com/@ExampleChannel"
+      source_channels:
+        description: "Source channel URLs, comma-separated"
+        type: string
+        required: true
+        default: "https://www.youtube.com/@Source1,https://www.youtube.com/@Source2"
+      clip_duration:
+        description: "Clip duration in seconds"
+        type: number
+        required: true
+        default: 15
+      fps:
+        description: "Output frames per second"
+        type: number
+        required: true
+        default: 30
+      output_resolution:
+        description: "Output resolution (WIDTHxHEIGHT)"
+        type: string
+        required: true
+        default: "1920x1080"
+
+jobs:
+  setup-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: write
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Create folders
+        run: |
+          mkdir -p scripts config data clips output tests
+          touch tests/.gitkeep
+
+      - name: Write config
+        env:
+          REFERENCE_CHANNEL_URL: ${{ inputs.reference_channel_url }}
+          SOURCE_CHANNELS: ${{ inputs.source_channels }}
+          CLIP_DURATION: ${{ inputs.clip_duration }}
+          FPS: ${{ inputs.fps }}
+          OUTPUT_RESOLUTION: ${{ inputs.output_resolution }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          def to_number(value):
+              number = float(value)
+              return int(number) if number == int(number) else number
+
+          sources = [s.strip() for s in os.environ["SOURCE_CHANNELS"].split(",") if s.strip()]
+          if not sources:
+              print("ERROR: source_channels is empty")
+              sys.exit(1)
+
+          resolution = os.environ["OUTPUT_RESOLUTION"].strip()
+          if not re.fullmatch(r"[0-9]+x[0-9]+", resolution):
+              print("ERROR: output_resolution must look like 1920x1080")
+              sys.exit(1)
+
+          config = {
+              "reference_channel_url": os.environ["REFERENCE_CHANNEL_URL"].strip(),
+              "source_channels": sources,
+              "clip_duration": to_number(os.environ["CLIP_DURATION"]),
+              "fps": to_number(os.environ["FPS"]),
+              "output_resolution": resolution,
+          }
+
+          with open("config/channel_config.json", "w", encoding="utf-8") as f:
+              json.dump(config, f, indent=2)
+              f.write("\n")
+          PY
+          python3 -m json.tool config/channel_config.json > /dev/null
+          echo "Config written and validated:"
+          cat config/channel_config.json
+
+      - name: Write mock Python scripts
+        run: |
+          cat > scripts/fetch_channel_videos.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          CONFIG_PATH = "config/channel_config.json"
+          OUTPUT_PATH = "data/video_list.json"
+
+
+          def main():
+              if not os.path.exists(CONFIG_PATH):
+                  print("ERROR: missing " + CONFIG_PATH)
+                  sys.exit(1)
+              with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                  cfg = json.load(f)
+
+              print("Reference channel: " + cfg["reference_channel_url"])
+              videos = []
+              for i, channel in enumerate(cfg["source_channels"], start=1):
+                  print("Source channel: " + channel)
+                  for j in (1, 2):
+                      videos.append({
+                          "id": "mock_%d_%d" % (i, j),
+                          "channel": channel,
+                          "title": "Mock video %d from source %d" % (j, i),
+                          "duration_seconds": 120,
+                      })
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump({"videos": videos}, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH + " (" + str(len(videos)) + " videos)")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/download_clips.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          VIDEO_LIST_PATH = "data/video_list.json"
+
+
+          def main():
+              if not os.path.exists(VIDEO_LIST_PATH):
+                  print("ERROR: missing " + VIDEO_LIST_PATH + " (run fetch_channel_videos.py first)")
+                  sys.exit(1)
+              with open(VIDEO_LIST_PATH, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              videos = data.get("videos", [])
+              os.makedirs("clips", exist_ok=True)
+              for index in (1, 2):
+                  source = videos[index - 1]["id"] if len(videos) >= index else "none"
+                  path = "clips/clip_%03d.mp4" % index
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write("MOCK CLIP " + str(index) + " from " + source + "\n")
+                  print("Wrote " + path)
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/analyze_channel_style.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          CONFIG_PATH = "config/channel_config.json"
+          OUTPUT_PATH = "data/style_profile.json"
+
+
+          def main():
+              if not os.path.exists(CONFIG_PATH):
+                  print("ERROR: missing " + CONFIG_PATH)
+                  sys.exit(1)
+              with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                  cfg = json.load(f)
+
+              profile = {
+                  "reference_channel_url": cfg["reference_channel_url"],
+                  "average_cut_length_seconds": 3.5,
+                  "dominant_transition": "hard_cut",
+                  "color_grade": "neutral",
+                  "music_style": "upbeat",
+                  "caption_style": "bottom_center_white",
+              }
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump(profile, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH)
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/generate_edit_list.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          CONFIG_PATH = "config/channel_config.json"
+          OUTPUT_PATH = "data/edit_list.json"
+
+
+          def main():
+              if not os.path.exists(CONFIG_PATH):
+                  print("ERROR: missing " + CONFIG_PATH)
+                  sys.exit(1)
+              with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                  cfg = json.load(f)
+
+              duration = cfg["clip_duration"]
+              clips = []
+              for index in (1, 2):
+                  clips.append({
+                      "file": "clips/clip_%03d.mp4" % index,
+                      "start": 0,
+                      "duration": duration,
+                  })
+
+              edit_list = {"clips": clips, "total_duration": duration * len(clips)}
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump(edit_list, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH + " (total_duration=" + str(edit_list["total_duration"]) + ")")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/render_final_video.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          CONFIG_PATH = "config/channel_config.json"
+          EDIT_LIST_PATH = "data/edit_list.json"
+          OUTPUT_PATH = "output/final_video.mp4"
+
+
+          def main():
+              for required in (CONFIG_PATH, EDIT_LIST_PATH):
+                  if not os.path.exists(required):
+                      print("ERROR: missing " + required)
+                      sys.exit(1)
+              with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                  cfg = json.load(f)
+              with open(EDIT_LIST_PATH, "r", encoding="utf-8") as f:
+                  edit_list = json.load(f)
+
+              resolution = cfg["output_resolution"]
+              fps = cfg["fps"]
+              inputs = " ".join("-i " + c["file"] for c in edit_list["clips"])
+              command = (
+                  "ffmpeg " + inputs
+                  + " -filter_complex concat=n=" + str(len(edit_list["clips"])) + ":v=1:a=0"
+                  + " -s " + resolution + " -r " + str(fps) + " " + OUTPUT_PATH
+              )
+              print("Mock ffmpeg command (not executed):")
+              print(command)
+
+              os.makedirs("output", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  f.write("MOCK FINAL VIDEO\n")
+                  f.write("resolution=" + resolution + "\n")
+                  f.write("fps=" + str(fps) + "\n")
+                  f.write("total_duration=" + str(edit_list["total_duration"]) + "\n")
+                  f.write("command=" + command + "\n")
+              print("Wrote " + OUTPUT_PATH)
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          chmod +x scripts/*.py
+          ls -l scripts
+
+      - name: Write requirements.txt
+        run: |
+          cat > requirements.txt <<'REQ'
+          # Mock dependency list. Nothing here is installed by the setup workflow.
+          # Uncomment and pin versions when real scripts are added.
+          # google-api-python-client
+          # requests
+          # moviepy
+          REQ
+
+      - name: Install dependencies (mock)
+        run: |
+          echo "Mock install step: skipping real dependency installation."
+          echo "Dependencies listed in requirements.txt are commented out."
+
+      - name: Run mock pipeline
+        run: |
+          set -euo pipefail
+          python3 scripts/fetch_channel_videos.py
+          python3 scripts/download_clips.py
+          python3 scripts/analyze_channel_style.py
+          python3 scripts/generate_edit_list.py
+          python3 scripts/render_final_video.py
+
+      - name: Verify outputs
+        run: |
+          set -euo pipefail
+          find scripts config data clips output tests -type f | sort
+          expected="
+          config/channel_config.json
+          scripts/fetch_channel_videos.py
+          scripts/download_clips.py
+          scripts/analyze_channel_style.py
+          scripts/generate_edit_list.py
+          scripts/render_final_video.py
+          data/video_list.json
+          data/style_profile.json
+          data/edit_list.json
+          clips/clip_001.mp4
+          clips/clip_002.mp4
+          output/final_video.mp4
+          requirements.txt
+          "
+          missing=0
+          for f in $expected; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Verification failed: expected files are missing."
+            exit 1
+          fi
+          echo "Verification passed: all expected files exist."
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Run-once setup: scaffold folders, config and mock scripts"
+            git push
+          fi
+
+      - name: Summary
+        run: |
+          echo "Run-once setup complete."
+          echo "Created: scripts/, config/, data/, clips/, output/, tests/"
+          echo "Created: config/channel_config.json, requirements.txt, 5 mock scripts"
+          echo "Ran the mock pipeline and verified all outputs."
+          echo "Next steps: replace mock scripts with real logic, add secrets, and remove or disable this workflow."
