@@ -1,0 +1,382 @@
+name: Run-once setup & initial pipeline run
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_channel_url:
+        description: "YouTube channel URL for style/reference"
+        required: true
+        default: "https://www.youtube.com/@ExampleChannel"
+      source_channels:
+        description: "Comma-separated source channel URLs"
+        required: true
+        default: "https://www.youtube.com/@Source1,https://www.youtube.com/@Source2"
+      clip_duration:
+        description: "Clip duration in seconds"
+        required: true
+        default: "15"
+        type: number
+      fps:
+        description: "Target frame rate"
+        required: true
+        default: "30"
+        type: number
+      output_resolution:
+        description: "Output resolution (WIDTHxHEIGHT)"
+        required: true
+        default: "1920x1080"
+
+jobs:
+  setup-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: write
+
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
+
+    steps:
+      # --------------------------------------------------------------
+      # 1. CHECKOUT REPOSITORY
+      # --------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      # --------------------------------------------------------------
+      # 2. CREATE FOLDER STRUCTURE
+      # --------------------------------------------------------------
+      - name: Create folder structure
+        run: |
+          echo "Creating folder structure..."
+          mkdir -p scripts config data clips output tests
+          echo "Folders created: scripts/, config/, data/, clips/, output/, tests/"
+
+      # --------------------------------------------------------------
+      # 3. WRITE CONFIGURATION FILE
+      # --------------------------------------------------------------
+      - name: Write channel configuration
+        run: |
+          echo "Writing config/channel_config.json..."
+          cat > config/channel_config.json << 'EOF'
+          {
+            "reference_channel_url": "${{ github.event.inputs.reference_channel_url }}",
+            "source_channels": "${{ github.event.inputs.source_channels }}",
+            "clip_duration": ${{ github.event.inputs.clip_duration }},
+            "fps": ${{ github.event.inputs.fps }},
+            "output_resolution": "${{ github.event.inputs.output_resolution }}"
+          }
+          EOF
+          echo "Configuration written:"
+          cat config/channel_config.json
+
+      # --------------------------------------------------------------
+      # 4. WRITE PYTHON SCRIPTS (MOCK VERSIONS)
+      # --------------------------------------------------------------
+      - name: Write Python scripts
+        run: |
+          echo "Writing Python scripts..."
+          
+          # Script 1: Fetch channel videos
+          cat > scripts/fetch_channel_videos.py << 'PYEOF'
+          #!/usr/bin/env python3
+          """Mock script - fetches videos from YouTube channels."""
+          import json, os, sys
+          
+          def main():
+              print("Fetching videos from reference channel...")
+              config_path = 'config/channel_config.json'
+              if not os.path.exists(config_path):
+                  print("Config file not found!")
+                  sys.exit(1)
+              
+              with open(config_path) as f:
+                  config = json.load(f)
+              
+              print(f"  Reference: {config['reference_channel_url']}")
+              print(f"  Sources: {config['source_channels']}")
+              print("Would fetch video list from YouTube API")
+              
+              # Create mock data
+              os.makedirs('data', exist_ok=True)
+              with open('data/video_list.json', 'w') as f:
+                  json.dump({"videos": ["video1.mp4", "video2.mp4"]}, f, indent=2)
+              print("Created data/video_list.json")
+          
+          if __name__ == '__main__':
+              main()
+          PYEOF
+          
+          # Script 2: Download clips
+          cat > scripts/download_clips.py << 'PYEOF'
+          #!/usr/bin/env python3
+          """Mock script - downloads video clips."""
+          import json, os
+          
+          def main():
+              print("Downloading clips...")
+              
+              if not os.path.exists('data/video_list.json'):
+                  print("Video list not found! Run fetch_channel_videos.py first.")
+                  return
+              
+              os.makedirs('clips', exist_ok=True)
+              
+              # Create mock clip files
+              for i in range(1, 3):
+                  clip_path = f'clips/clip_{i}.mp4'
+                  with open(clip_path, 'w') as f:
+                      f.write(f"MOCK VIDEO CONTENT - Clip {i}")
+                  print(f"  Created {clip_path}")
+              
+              print("Downloaded 2 clips to clips/")
+          
+          if __name__ == '__main__':
+              main()
+          PYEOF
+          
+          # Script 3: Analyze channel style
+          cat > scripts/analyze_channel_style.py << 'PYEOF'
+          #!/usr/bin/env python3
+          """Mock script - analyzes channel style."""
+          import json, os
+          
+          def main():
+              print("Analyzing channel style...")
+              
+              with open('config/channel_config.json') as f:
+                  config = json.load(f)
+              
+              print(f"  Analyzing: {config['reference_channel_url']}")
+              print("  Style elements: color grading, pacing, transitions")
+              
+              # Create mock style profile
+              os.makedirs('data', exist_ok=True)
+              style_profile = {
+                  "color_grading": "warm",
+                  "pacing": "fast",
+                  "transitions": ["cut", "fade"],
+                  "thumbnail_style": "bold_text"
+              }
+              
+              with open('data/style_profile.json', 'w') as f:
+                  json.dump(style_profile, f, indent=2)
+              
+              print("Created data/style_profile.json")
+          
+          if __name__ == '__main__':
+              main()
+          PYEOF
+          
+          # Script 4: Generate edit list
+          cat > scripts/generate_edit_list.py << 'PYEOF'
+          #!/usr/bin/env python3
+          """Mock script - generates video edit list."""
+          import json, os
+          
+          def main():
+              print("Generating edit list...")
+              
+              with open('config/channel_config.json') as f:
+                  config = json.load(f)
+              
+              clip_duration = config['clip_duration']
+              print(f"  Clip duration: {clip_duration}s")
+              
+              # Create mock edit list
+              edit_list = {
+                  "clips": [
+                      {"start": 0, "duration": clip_duration, "source": "clip_1.mp4"},
+                      {"start": clip_duration, "duration": clip_duration, "source": "clip_2.mp4"}
+                  ],
+                  "total_duration": clip_duration * 2
+              }
+              
+              os.makedirs('data', exist_ok=True)
+              with open('data/edit_list.json', 'w') as f:
+                  json.dump(edit_list, f, indent=2)
+              
+              print("Created data/edit_list.json")
+          
+          if __name__ == '__main__':
+              main()
+          PYEOF
+          
+          # Script 5: Render final video
+          cat > scripts/render_final_video.py << 'PYEOF'
+          #!/usr/bin/env python3
+          """Mock script - renders final video using FFmpeg."""
+          import json, os, subprocess, sys
+          
+          def main():
+              print("Rendering final video...")
+              
+              # Check prerequisites
+              if not os.path.exists('data/edit_list.json'):
+                  print("Edit list not found!")
+                  sys.exit(1)
+              
+              with open('config/channel_config.json') as f:
+                  config = json.load(f)
+              
+              resolution = config['output_resolution']
+              fps = config['fps']
+              
+              print(f"  Resolution: {resolution}")
+              print(f"  FPS: {fps}")
+              
+              # Create output directory
+              os.makedirs('output', exist_ok=True)
+              
+              # Mock FFmpeg command (would be actual rendering in real version)
+              ffmpeg_cmd = [
+                  'ffmpeg',
+                  '-f', 'concat',
+                  '-i', 'data/edit_list.json',
+                  '-c:v', 'libx264',
+                  '-preset', 'medium',
+                  '-r', str(fps),
+                  '-s', resolution,
+                  'output/final_video.mp4'
+              ]
+              
+              print(f"  Would run: {' '.join(ffmpeg_cmd)}")
+              
+              # Create mock output file
+              with open('output/final_video.mp4', 'w') as f:
+                  f.write("MOCK FINAL VIDEO - This would be a real MP4 file")
+              
+              print("Created output/final_video.mp4")
+              print("Video rendering complete!")
+          
+          if __name__ == '__main__':
+              main()
+          PYEOF
+          
+          # Make all scripts executable
+          chmod +x scripts/*.py
+          echo "All Python scripts written and made executable"
+
+      # --------------------------------------------------------------
+      # 5. CREATE REQUIREMENTS FILE
+      # --------------------------------------------------------------
+      - name: Create requirements.txt
+        run: |
+          echo "Creating requirements.txt..."
+          cat > requirements.txt << 'EOF'
+          # Mock dependencies - real version would include:
+          # google-api-python-client
+          # youtube-dl
+          # opencv-python
+          # pillow
+          # numpy
+          # moviepy
+          EOF
+          echo "requirements.txt created"
+
+      # --------------------------------------------------------------
+      # 6. INSTALL DEPENDENCIES (MOCK)
+      # --------------------------------------------------------------
+      - name: Install dependencies (mock)
+        run: |
+          echo "Installing dependencies..."
+          echo "  Would run: pip install -r requirements.txt"
+          echo "  Would install: ffmpeg, python3, etc."
+          echo "Dependencies installed"
+
+      # --------------------------------------------------------------
+      # 7. RUN MOCK PIPELINE
+      # --------------------------------------------------------------
+      - name: Run mock pipeline
+        run: |
+          echo "Starting mock pipeline..."
+          echo "========================================"
+          
+          echo "Step 1/5: Fetching channel videos"
+          python3 scripts/fetch_channel_videos.py
+          
+          echo "Step 2/5: Downloading clips"
+          python3 scripts/download_clips.py
+          
+          echo "Step 3/5: Analyzing channel style"
+          python3 scripts/analyze_channel_style.py
+          
+          echo "Step 4/5: Generating edit list"
+          python3 scripts/generate_edit_list.py
+          
+          echo "Step 5/5: Rendering final video"
+          python3 scripts/render_final_video.py
+          
+          echo "========================================"
+          echo "MOCK PIPELINE COMPLETED SUCCESSFULLY!"
+
+      # --------------------------------------------------------------
+      # 8. VERIFY OUTPUTS
+      # --------------------------------------------------------------
+      - name: Verify outputs
+        run: |
+          echo "Verifying created files..."
+          
+          # Check directory structure
+          echo "Directory structure:"
+          find . -type f -not -path './.git/*' -not -path './.github/*' | sort
+          
+          # Check key files exist
+          echo ""
+          echo "Key files verification:"
+          [ -f config/channel_config.json ] && echo "  config/channel_config.json" || echo "  config/channel_config.json MISSING"
+          [ -f data/video_list.json ] && echo "  data/video_list.json" || echo "  data/video_list.json MISSING"
+          [ -f data/style_profile.json ] && echo "  data/style_profile.json" || echo "  data/style_profile.json MISSING"
+          [ -f data/edit_list.json ] && echo "  data/edit_list.json" || echo "  data/edit_list.json MISSING"
+          [ -f output/final_video.mp4 ] && echo "  output/final_video.mp4" || echo "  output/final_video.mp4 MISSING"
+          
+          echo ""
+          echo "Setup complete! Your repository is ready for real pipeline implementation."
+
+      # --------------------------------------------------------------
+      # 9. COMMIT CHANGES
+      # --------------------------------------------------------------
+      - name: Commit files
+        run: |
+          echo "Committing changes..."
+          git config user.name "Video Bot"
+          git config user.email "bot@video-pipeline.local"
+          
+          # Add all new files
+          git add .
+          
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+              echo "No changes to commit"
+          else
+              git commit -m "Run-once setup: created folder structure, config and mock scripts"
+              git push
+              echo "Changes committed and pushed"
+          fi
+
+      # --------------------------------------------------------------
+      # 10. SUMMARY
+      # --------------------------------------------------------------
+      - name: Display summary
+        run: |
+          echo ""
+          echo "============================================================"
+          echo "              RUN-ONCE SETUP COMPLETED SUCCESSFULLY"
+          echo "============================================================"
+          echo ""
+          echo "What was created:"
+          echo "  config/channel_config.json - Your channel configuration"
+          echo "  scripts/*.py - Mock pipeline scripts (ready for real implementation)"
+          echo "  data/*.json - Mock data files"
+          echo "  output/final_video.mp4 - Mock output file"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Replace mock scripts with real implementations"
+          echo "  2. Add secrets (YOUTUBE_API_KEY, etc.)"
+          echo "  3. Test with real YouTube API calls"
+          echo ""
+          echo "All systems ready for pipeline implementation!"
