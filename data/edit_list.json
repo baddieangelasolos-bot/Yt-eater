@@ -3,13 +3,28 @@
     {
       "file": "clips/clip_001.mp4",
       "start": 0,
-      "duration": 15
+      "duration": 30
     },
     {
       "file": "clips/clip_002.mp4",
       "start": 0,
-      "duration": 15
+      "duration": 30
+    },
+    {
+      "file": "clips/clip_003.mp4",
+      "start": 0,
+      "duration": 30
+    },
+    {
+      "file": "clips/clip_004.mp4",
+      "start": 0,
+      "duration": 30
+    },
+    {
+      "file": "clips/clip_005.mp4",
+      "start": 0,
+      "duration": 30
     }
   ],
-  "total_duration": 30
+  "total_duration": 150
 }

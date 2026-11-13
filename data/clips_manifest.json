@@ -1,0 +1,29 @@
+{
+  "clips": [
+    {
+      "file": "clips/clip_001.mp4",
+      "source_video_id": "6Fop8HbBS68",
+      "source_url": "https://www.youtube.com/watch?v=6Fop8HbBS68"
+    },
+    {
+      "file": "clips/clip_002.mp4",
+      "source_video_id": "LQ1-Jce8jxk",
+      "source_url": "https://www.youtube.com/watch?v=LQ1-Jce8jxk"
+    },
+    {
+      "file": "clips/clip_003.mp4",
+      "source_video_id": "S2MPIBqGWbQ",
+      "source_url": "https://www.youtube.com/watch?v=S2MPIBqGWbQ"
+    },
+    {
+      "file": "clips/clip_004.mp4",
+      "source_video_id": "n8tvWCEi3jM",
+      "source_url": "https://www.youtube.com/watch?v=n8tvWCEi3jM"
+    },
+    {
+      "file": "clips/clip_005.mp4",
+      "source_video_id": "cJg36BclV2Q",
+      "source_url": "https://www.youtube.com/watch?v=cJg36BclV2Q"
+    }
+  ]
+}

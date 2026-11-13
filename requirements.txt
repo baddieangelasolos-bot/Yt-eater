@@ -1,5 +1,3 @@
-# Mock dependency list. Nothing here is installed by the setup workflow.
-# Uncomment and pin versions when real scripts are added.
-# google-api-python-client
-# requests
-# moviepy
+# Installed by the workflow into .venv. Always use the latest yt-dlp,
+# because YouTube changes often and old versions break.
+yt-dlp[default]

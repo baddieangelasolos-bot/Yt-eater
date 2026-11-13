@@ -3,26 +3,22 @@ import json
 import os
 import sys
 
-CONFIG_PATH = "config/channel_config.json"
+from ytdlp_common import load_config
+
+MANIFEST_PATH = "data/clips_manifest.json"
 OUTPUT_PATH = "data/edit_list.json"
 
 
 def main():
-    if not os.path.exists(CONFIG_PATH):
-        print("ERROR: missing " + CONFIG_PATH)
+    if not os.path.exists(MANIFEST_PATH):
+        print("ERROR: missing " + MANIFEST_PATH + " (run download_clips.py first)")
         sys.exit(1)
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
+    cfg = load_config()
+    with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
 
     duration = cfg["clip_duration"]
-    clips = []
-    for index in (1, 2):
-        clips.append({
-            "file": "clips/clip_%03d.mp4" % index,
-            "start": 0,
-            "duration": duration,
-        })
-
+    clips = [{"file": c["file"], "start": 0, "duration": duration} for c in manifest["clips"]]
     edit_list = {"clips": clips, "total_duration": duration * len(clips)}
 
     os.makedirs("data", exist_ok=True)

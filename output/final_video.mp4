@@ -1,5 +1,0 @@
-MOCK FINAL VIDEO
-resolution=1920x1080
-fps=30
-total_duration=30
-command=ffmpeg -i clips/clip_001.mp4 -i clips/clip_002.mp4 -filter_complex concat=n=2:v=1:a=0 -s 1920x1080 -r 30 output/final_video.mp4

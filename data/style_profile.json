@@ -1,8 +1,6 @@
 {
-  "reference_channel_url": "https://www.youtube.com/@ExampleChannel",
-  "average_cut_length_seconds": 3.5,
-  "dominant_transition": "hard_cut",
-  "color_grade": "neutral",
-  "music_style": "upbeat",
-  "caption_style": "bottom_center_white"
+  "reference_channel_url": "https://youtube.com/@kiano7hd?si=-0Q5BQ9QgOM8FYUI",
+  "sample_size": 10,
+  "average_video_duration_seconds": 839.8,
+  "note": "Visual style analysis (cuts, color, captions) is not implemented yet."
 }

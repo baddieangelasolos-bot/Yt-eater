@@ -1,10 +1,10 @@
 {
-  "reference_channel_url": "https://www.youtube.com/@ExampleChannel",
+  "reference_channel_url": "https://youtube.com/@kiano7hd?si=-0Q5BQ9QgOM8FYUI",
   "source_channels": [
-    "https://www.youtube.com/@Source1",
-    "https://www.youtube.com/@Source2"
+    "https://youtube.com/playlist?list=PLArNRyCYsmaV-hMEDnCnGv52aJXJR1B-x&si=bW8EhIlXpOegUhph"
   ],
-  "clip_duration": 15,
-  "fps": 30,
+  "videos_per_channel": 5,
+  "clip_duration": 30,
+  "fps": 60,
   "output_resolution": "1920x1080"
 }
