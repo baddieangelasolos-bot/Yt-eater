@@ -1,0 +1,10 @@
+{
+  "reference_channel_url": "https://www.youtube.com/@ExampleChannel",
+  "source_channels": [
+    "https://www.youtube.com/@Source1",
+    "https://www.youtube.com/@Source2"
+  ],
+  "clip_duration": 15,
+  "fps": 30,
+  "output_resolution": "1920x1080"
+}

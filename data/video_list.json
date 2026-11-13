@@ -1,0 +1,28 @@
+{
+  "videos": [
+    {
+      "id": "mock_1_1",
+      "channel": "https://www.youtube.com/@Source1",
+      "title": "Mock video 1 from source 1",
+      "duration_seconds": 120
+    },
+    {
+      "id": "mock_1_2",
+      "channel": "https://www.youtube.com/@Source1",
+      "title": "Mock video 2 from source 1",
+      "duration_seconds": 120
+    },
+    {
+      "id": "mock_2_1",
+      "channel": "https://www.youtube.com/@Source2",
+      "title": "Mock video 1 from source 2",
+      "duration_seconds": 120
+    },
+    {
+      "id": "mock_2_2",
+      "channel": "https://www.youtube.com/@Source2",
+      "title": "Mock video 2 from source 2",
+      "duration_seconds": 120
+    }
+  ]
+}
