@@ -1,0 +1,598 @@
+name: Video Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_channel_url:
+        description: "Reference channel URL (style reference)"
+        type: string
+        required: true
+        default: "https://www.youtube.com/@ExampleChannel"
+      source_channels:
+        description: "Source channel/playlist/video URLs, comma-separated"
+        type: string
+        required: true
+        default: "https://www.youtube.com/@Source1,https://www.youtube.com/@Source2"
+      videos_per_channel:
+        description: "How many latest videos to clip per source URL"
+        type: number
+        required: true
+        default: 2
+      clip_duration:
+        description: "Clip duration in seconds (taken from the start of each video)"
+        type: number
+        required: true
+        default: 15
+      fps:
+        description: "Output frames per second"
+        type: number
+        required: true
+        default: 30
+      output_resolution:
+        description: "Output resolution (WIDTHxHEIGHT)"
+        type: string
+        required: true
+        default: "1920x1080"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: write
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      DEFAULT_CHANNEL_URL: ${{ secrets.DEFAULT_CHANNEL_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Create folders and .gitignore
+        run: |
+          mkdir -p scripts config data clips output tests
+          touch tests/.gitkeep clips/.gitkeep output/.gitkeep
+          rm -f clips/*.mp4 clips/*.webm clips/*.mkv output/*.mp4 data/*.json
+          cat > .gitignore <<'GI'
+          .venv/
+          __pycache__/
+          *.pyc
+          clips/*
+          !clips/.gitkeep
+          output/*
+          !output/.gitkeep
+          GI
+
+      - name: Install yt-dlp
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --upgrade pip
+          .venv/bin/pip install --quiet --upgrade "yt-dlp[default]"
+          echo "yt-dlp version:"
+          .venv/bin/python -m yt_dlp --version
+          echo "node version:"
+          node --version
+          echo "ffmpeg version:"
+          ffmpeg -version | head -n 1
+
+      - name: Prepare optional cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            umask 077
+            printf '%s\n' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/yt_cookies.txt"
+            echo "YT_COOKIES_FILE=$RUNNER_TEMP/yt_cookies.txt" >> "$GITHUB_ENV"
+            echo "Cookies file prepared."
+          else
+            echo "No cookies secret set; continuing without cookies."
+          fi
+
+      - name: Write config
+        env:
+          REFERENCE_CHANNEL_URL: ${{ inputs.reference_channel_url }}
+          SOURCE_CHANNELS: ${{ inputs.source_channels }}
+          VIDEOS_PER_CHANNEL: ${{ inputs.videos_per_channel }}
+          CLIP_DURATION: ${{ inputs.clip_duration }}
+          FPS: ${{ inputs.fps }}
+          OUTPUT_RESOLUTION: ${{ inputs.output_resolution }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          def to_number(name, value, minimum):
+              number = float(value)
+              number = int(number) if number == int(number) else number
+              if number < minimum:
+                  print("ERROR: " + name + " must be at least " + str(minimum))
+                  sys.exit(1)
+              return number
+
+          sources = [s.strip() for s in os.environ["SOURCE_CHANNELS"].split(",") if s.strip()]
+          if not sources:
+              print("ERROR: source_channels is empty")
+              sys.exit(1)
+          for s in sources:
+              if not re.match(r"^https?://", s):
+                  print("ERROR: not a URL: " + s)
+                  sys.exit(1)
+
+          resolution = os.environ["OUTPUT_RESOLUTION"].strip()
+          if not re.fullmatch(r"[0-9]+x[0-9]+", resolution):
+              print("ERROR: output_resolution must look like 1920x1080")
+              sys.exit(1)
+
+          config = {
+              "reference_channel_url": os.environ["REFERENCE_CHANNEL_URL"].strip(),
+              "source_channels": sources,
+              "videos_per_channel": int(to_number("videos_per_channel", os.environ["VIDEOS_PER_CHANNEL"], 1)),
+              "clip_duration": to_number("clip_duration", os.environ["CLIP_DURATION"], 1),
+              "fps": to_number("fps", os.environ["FPS"], 1),
+              "output_resolution": resolution,
+          }
+
+          with open("config/channel_config.json", "w", encoding="utf-8") as f:
+              json.dump(config, f, indent=2)
+              f.write("\n")
+          PY
+          python3 -m json.tool config/channel_config.json > /dev/null
+          echo "Config written and validated:"
+          cat config/channel_config.json
+
+      - name: Write pipeline scripts
+        run: |
+          cat > scripts/ytdlp_common.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import re
+          import sys
+
+          CONFIG_PATH = "config/channel_config.json"
+
+
+          def load_config():
+              if not os.path.exists(CONFIG_PATH):
+                  print("ERROR: missing " + CONFIG_PATH)
+                  sys.exit(1)
+              with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                  return json.load(f)
+
+
+          def normalize_url(url):
+              # A bare channel URL lists tabs; point it at the Videos tab instead.
+              u = url.strip().rstrip("/")
+              pattern = r"^https?://(www\.|m\.)?youtube\.com/(@[^/?]+|channel/[^/?]+|c/[^/?]+|user/[^/?]+)$"
+              if re.match(pattern, u):
+                  u = u + "/videos"
+              return u
+
+
+          def ytdlp_base():
+              cmd = [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node"]
+              cookies = os.environ.get("YT_COOKIES_FILE", "")
+              if cookies and os.path.exists(cookies):
+                  cmd += ["--cookies", cookies]
+              return cmd
+
+
+          def collect_entries(data, out):
+              if not isinstance(data, dict):
+                  return
+              entries = data.get("entries")
+              if entries:
+                  for entry in entries:
+                      collect_entries(entry, out)
+              elif data.get("id") and data.get("_type", "video") in ("video", "url", "url_transparent"):
+                  out.append(data)
+
+
+          def entry_url(entry):
+              url = entry.get("webpage_url") or entry.get("url") or ""
+              if not url.startswith("http"):
+                  url = "https://www.youtube.com/watch?v=" + str(entry["id"])
+              return url
+          PY
+
+          cat > scripts/fetch_channel_videos.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import subprocess
+          import sys
+
+          from ytdlp_common import collect_entries, entry_url, load_config, normalize_url, ytdlp_base
+
+          OUTPUT_PATH = "data/video_list.json"
+
+
+          def main():
+              cfg = load_config()
+              limit = int(cfg["videos_per_channel"])
+              print("Reference channel: " + cfg["reference_channel_url"])
+
+              videos = []
+              for channel in cfg["source_channels"]:
+                  url = normalize_url(channel)
+                  print("Listing latest videos from: " + url)
+                  cmd = ytdlp_base() + [
+                      "--ignore-errors", "--flat-playlist", "-J",
+                      "--playlist-end", str(limit), url,
+                  ]
+                  proc = subprocess.run(cmd, stdout=subprocess.PIPE, universal_newlines=True)
+                  if not proc.stdout.strip():
+                      print("WARNING: no data returned for " + channel)
+                      continue
+                  try:
+                      data = json.loads(proc.stdout)
+                  except ValueError:
+                      print("WARNING: could not parse yt-dlp output for " + channel)
+                      continue
+
+                  found = []
+                  collect_entries(data, found)
+                  for entry in found[:limit]:
+                      duration = entry.get("duration")
+                      videos.append({
+                          "id": str(entry["id"]),
+                          "title": entry.get("title") or "",
+                          "url": entry_url(entry),
+                          "source": channel,
+                          "duration_seconds": duration,
+                      })
+                  print("Found " + str(len(found[:limit])) + " video(s)")
+
+              if not videos:
+                  print("ERROR: no videos found for any source URL")
+                  sys.exit(1)
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump({"videos": videos}, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH + " (" + str(len(videos)) + " videos)")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/download_clips.py <<'PY'
+          #!/usr/bin/env python3
+          import glob
+          import json
+          import os
+          import subprocess
+          import sys
+
+          from ytdlp_common import load_config, ytdlp_base
+
+          VIDEO_LIST_PATH = "data/video_list.json"
+          MANIFEST_PATH = "data/clips_manifest.json"
+
+
+          def main():
+              if not os.path.exists(VIDEO_LIST_PATH):
+                  print("ERROR: missing " + VIDEO_LIST_PATH + " (run fetch_channel_videos.py first)")
+                  sys.exit(1)
+              cfg = load_config()
+              with open(VIDEO_LIST_PATH, "r", encoding="utf-8") as f:
+                  videos = json.load(f)["videos"]
+
+              duration = cfg["clip_duration"]
+              max_height = int(cfg["output_resolution"].split("x")[1])
+              fmt = "bv*[height<=" + str(max_height) + "]+ba/b[height<=" + str(max_height) + "]/b"
+              os.makedirs("clips", exist_ok=True)
+
+              clips = []
+              index = 0
+              for video in videos:
+                  known = video.get("duration_seconds")
+                  if known is not None and known < duration:
+                      print("Skipping " + video["id"] + " (shorter than clip_duration)")
+                      continue
+
+                  index += 1
+                  prefix = "clips/clip_%03d" % index
+                  cmd = ytdlp_base() + [
+                      "--no-playlist", "--retries", "3",
+                      "--download-sections", "*0-" + str(duration),
+                      "--force-keyframes-at-cuts",
+                      "-f", fmt, "--merge-output-format", "mp4",
+                      "-o", prefix + ".%(ext)s",
+                      video["url"],
+                  ]
+                  print("Downloading clip " + str(index) + " from " + video["url"])
+                  try:
+                      result = subprocess.run(cmd, timeout=900)
+                      code = result.returncode
+                  except subprocess.TimeoutExpired:
+                      print("WARNING: download timed out for " + video["id"])
+                      code = 1
+
+                  files = [p for p in glob.glob(prefix + ".*") if not p.endswith((".part", ".ytdl"))]
+                  if code != 0 or not files:
+                      print("WARNING: download failed for " + video["id"])
+                      for leftover in glob.glob(prefix + ".*"):
+                          os.remove(leftover)
+                      index -= 1
+                      continue
+
+                  clips.append({
+                      "file": files[0],
+                      "source_video_id": video["id"],
+                      "source_url": video["url"],
+                  })
+                  print("Saved " + files[0])
+
+              if not clips:
+                  print("ERROR: no clips were downloaded. See the warnings above.")
+                  sys.exit(1)
+
+              with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+                  json.dump({"clips": clips}, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + MANIFEST_PATH + " (" + str(len(clips)) + " clips)")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/analyze_channel_style.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import subprocess
+
+          from ytdlp_common import collect_entries, load_config, normalize_url, ytdlp_base
+
+          OUTPUT_PATH = "data/style_profile.json"
+
+
+          def main():
+              cfg = load_config()
+              url = normalize_url(cfg["reference_channel_url"])
+              print("Sampling reference channel: " + url)
+
+              durations = []
+              cmd = ytdlp_base() + ["--ignore-errors", "--flat-playlist", "-J", "--playlist-end", "10", url]
+              proc = subprocess.run(cmd, stdout=subprocess.PIPE, universal_newlines=True)
+              if proc.stdout.strip():
+                  try:
+                      found = []
+                      collect_entries(json.loads(proc.stdout), found)
+                      durations = [e["duration"] for e in found if e.get("duration")]
+                  except ValueError:
+                      print("WARNING: could not parse reference channel data")
+              else:
+                  print("WARNING: no data returned for the reference channel")
+
+              average = round(sum(durations) / len(durations), 1) if durations else None
+              profile = {
+                  "reference_channel_url": cfg["reference_channel_url"],
+                  "sample_size": len(durations),
+                  "average_video_duration_seconds": average,
+                  "note": "Visual style analysis (cuts, color, captions) is not implemented yet.",
+              }
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump(profile, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH)
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/generate_edit_list.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+
+          from ytdlp_common import load_config
+
+          MANIFEST_PATH = "data/clips_manifest.json"
+          OUTPUT_PATH = "data/edit_list.json"
+
+
+          def main():
+              if not os.path.exists(MANIFEST_PATH):
+                  print("ERROR: missing " + MANIFEST_PATH + " (run download_clips.py first)")
+                  sys.exit(1)
+              cfg = load_config()
+              with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+                  manifest = json.load(f)
+
+              duration = cfg["clip_duration"]
+              clips = [{"file": c["file"], "start": 0, "duration": duration} for c in manifest["clips"]]
+              edit_list = {"clips": clips, "total_duration": duration * len(clips)}
+
+              os.makedirs("data", exist_ok=True)
+              with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                  json.dump(edit_list, f, indent=2)
+                  f.write("\n")
+              print("Wrote " + OUTPUT_PATH + " (total_duration=" + str(edit_list["total_duration"]) + ")")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          cat > scripts/render_final_video.py <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import shlex
+          import subprocess
+          import sys
+
+          from ytdlp_common import load_config
+
+          EDIT_LIST_PATH = "data/edit_list.json"
+          OUTPUT_PATH = "output/final_video.mp4"
+
+
+          def has_audio(path):
+              probe = subprocess.run(
+                  ["ffprobe", "-v", "error", "-select_streams", "a",
+                   "-show_entries", "stream=index", "-of", "csv=p=0", path],
+                  stdout=subprocess.PIPE, universal_newlines=True,
+              )
+              return bool(probe.stdout.strip())
+
+
+          def main():
+              if not os.path.exists(EDIT_LIST_PATH):
+                  print("ERROR: missing " + EDIT_LIST_PATH + " (run generate_edit_list.py first)")
+                  sys.exit(1)
+              cfg = load_config()
+              with open(EDIT_LIST_PATH, "r", encoding="utf-8") as f:
+                  edit_list = json.load(f)
+
+              width, height = cfg["output_resolution"].split("x")
+              fps = str(cfg["fps"])
+              clips = edit_list["clips"]
+              audio = all(has_audio(c["file"]) for c in clips)
+              if not audio:
+                  print("Some clips have no audio; rendering video only.")
+
+              cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+              for c in clips:
+                  cmd += ["-t", str(c["duration"]), "-i", c["file"]]
+
+              parts = []
+              labels = ""
+              for i in range(len(clips)):
+                  parts.append(
+                      "[%d:v]scale=%s:%s:force_original_aspect_ratio=decrease,"
+                      "pad=%s:%s:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%s,format=yuv420p[v%d]"
+                      % (i, width, height, width, height, fps, i)
+                  )
+                  labels += "[v%d]" % i
+                  if audio:
+                      parts.append("[%d:a]aresample=48000,aformat=channel_layouts=stereo[a%d]" % (i, i))
+                      labels += "[a%d]" % i
+              parts.append(labels + "concat=n=%d:v=1:a=%d%s" % (len(clips), 1 if audio else 0, "[v][a]" if audio else "[v]"))
+
+              cmd += ["-filter_complex", ";".join(parts), "-map", "[v]"]
+              if audio:
+                  cmd += ["-map", "[a]", "-c:a", "aac"]
+              cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", OUTPUT_PATH]
+
+              os.makedirs("output", exist_ok=True)
+              print("Running: " + " ".join(shlex.quote(a) for a in cmd))
+              result = subprocess.run(cmd)
+              if result.returncode != 0:
+                  print("ERROR: ffmpeg failed")
+                  sys.exit(1)
+              if not os.path.exists(OUTPUT_PATH) or os.path.getsize(OUTPUT_PATH) == 0:
+                  print("ERROR: output video is missing or empty")
+                  sys.exit(1)
+              print("Wrote " + OUTPUT_PATH + " (" + str(os.path.getsize(OUTPUT_PATH)) + " bytes)")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+          chmod +x scripts/*.py
+          ls -l scripts
+
+      - name: Write requirements.txt
+        run: |
+          cat > requirements.txt <<'REQ'
+          # Installed by the workflow into .venv. Always use the latest yt-dlp,
+          # because YouTube changes often and old versions break.
+          yt-dlp[default]
+          REQ
+
+      - name: Run pipeline
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/fetch_channel_videos.py
+          .venv/bin/python scripts/download_clips.py
+          .venv/bin/python scripts/analyze_channel_style.py
+          .venv/bin/python scripts/generate_edit_list.py
+          .venv/bin/python scripts/render_final_video.py
+
+      - name: Verify outputs
+        run: |
+          set -euo pipefail
+          find scripts config data clips output tests -type f | sort
+          expected="
+          config/channel_config.json
+          scripts/ytdlp_common.py
+          scripts/fetch_channel_videos.py
+          scripts/download_clips.py
+          scripts/analyze_channel_style.py
+          scripts/generate_edit_list.py
+          scripts/render_final_video.py
+          data/video_list.json
+          data/clips_manifest.json
+          data/style_profile.json
+          data/edit_list.json
+          output/final_video.mp4
+          requirements.txt
+          "
+          missing=0
+          for f in $expected; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              missing=1
+            fi
+          done
+          if ! compgen -G "clips/clip_001.*" > /dev/null; then
+            echo "MISSING: clips/clip_001.*"
+            missing=1
+          fi
+          if [ ! -s output/final_video.mp4 ]; then
+            echo "EMPTY: output/final_video.mp4"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Verification failed."
+            exit 1
+          fi
+          echo "Verification passed: all expected files exist."
+
+      - name: Upload clips and final video
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-output
+          path: |
+            clips/
+            output/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git ls-files clips output | grep -E '\.(mp4|webm|mkv)$' | xargs -r git rm --cached -q
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Video pipeline: update scripts, config and data"
+            git push
+          fi
+
+      - name: Summary
+        run: |
+          echo "Video pipeline complete."
+          echo "Clips and the final video are in the run's Artifacts section (pipeline-output)."
+          echo "Scripts, config and data JSON files were committed to the repo."
+          echo "Media files are not committed to keep the repo small."
